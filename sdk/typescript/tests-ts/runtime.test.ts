@@ -1776,12 +1776,18 @@ for await (const line of createInterface({ input: process.stdin })) {
       JSON.stringify({ tokens: { refresh_token: "SYNTHETIC_REFRESH" } }),
       { mode: 0o600 },
     );
+    const replacement = join(root, "replacement-auth.json");
+    await writeFile(
+      replacement,
+      '{"auth_mode":"apikey","OPENAI_API_KEY":"SYNTHETIC_KEY"}',
+      { mode: 0o600 },
+    );
     const originalCopy = fsPromises.copyFile;
     mockFs(() => ({
       copyFile: async (...args: Parameters<typeof fsPromises.copyFile>) => {
         await originalCopy(...args);
         if (args[0] === source) {
-          await writeFile(source, '{"auth_mode":"apikey","OPENAI_API_KEY":"SYNTHETIC_KEY"}');
+          await rename(replacement, source);
         }
       },
     }));
