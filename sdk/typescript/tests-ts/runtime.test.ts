@@ -1724,6 +1724,92 @@ for await (const line of createInterface({ input: process.stdin })) {
     }
   });
 
+  test("does not copy renewable ChatGPT credentials into a second home", async () => {
+    const root = await temporaryDirectory();
+    const ambient = join(root, "ambient");
+    const isolated = join(root, "isolated");
+    await mkdir(ambient);
+    const saved = JSON.stringify({
+      auth_mode: "chatgpt",
+      OPENAI_API_KEY: null,
+      tokens: {
+        access_token: "SYNTHETIC_ACCESS_TOKEN",
+        refresh_token: "SYNTHETIC_REFRESH_TOKEN",
+      },
+    });
+    await writeFile(join(ambient, "auth.json"), saved, { mode: 0o600 });
+
+    expect(await importAmbientAuth(ambient, isolated)).toBe(false);
+    expect(await readdir(isolated)).toEqual([]);
+    expect(await readFile(join(ambient, "auth.json"), "utf8")).toBe(saved);
+  });
+
+  test("does not import a refresh token hidden under another auth mode", async () => {
+    const root = await temporaryDirectory();
+    const ambient = join(root, "ambient");
+    const isolated = join(root, "isolated");
+    await mkdir(ambient);
+    await writeFile(
+      join(ambient, "auth.json"),
+      JSON.stringify({
+        auth_mode: "apikey",
+        OPENAI_API_KEY: "SYNTHETIC_API_KEY",
+        tokens: { refresh_token: "SYNTHETIC_REFRESH_TOKEN" },
+      }),
+      { mode: 0o600 },
+    );
+
+    expect(await importAmbientAuth(ambient, isolated)).toBe(false);
+    expect(await readdir(isolated)).toEqual([]);
+  });
+
+  test("checks the copied credential when ambient auth changes during import", async () => {
+    const name = "checks the copied credential when ambient auth changes during import";
+    if (runTestInSubprocess(import.meta.path, name)) return;
+    const root = await temporaryDirectory();
+    const ambient = join(root, "ambient");
+    const isolated = join(root, "isolated");
+    await mkdir(ambient);
+    const source = join(ambient, "auth.json");
+    await writeFile(
+      source,
+      JSON.stringify({ tokens: { refresh_token: "SYNTHETIC_REFRESH" } }),
+      { mode: 0o600 },
+    );
+    const replacement = join(root, "replacement-auth.json");
+    await writeFile(
+      replacement,
+      '{"auth_mode":"apikey","OPENAI_API_KEY":"SYNTHETIC_KEY"}',
+      { mode: 0o600 },
+    );
+    const originalCopy = fsPromises.copyFile;
+    mockFs(() => ({
+      copyFile: async (...args: Parameters<typeof fsPromises.copyFile>) => {
+        await originalCopy(...args);
+        if (args[0] === source) {
+          await rename(replacement, source);
+        }
+      },
+    }));
+    try {
+      expect(await importAmbientAuth(ambient, isolated)).toBe(false);
+      expect(await readdir(isolated)).toEqual([]);
+    } finally {
+      restoreFs({ copyFile: originalCopy });
+    }
+  });
+
+  test("keeps a static API key usable through ambient import", async () => {
+    const root = await temporaryDirectory();
+    const ambient = join(root, "ambient");
+    const isolated = join(root, "isolated");
+    await mkdir(ambient);
+    const content = '{"auth_mode":"apikey","OPENAI_API_KEY":"SYNTHETIC_KEY"}';
+    await writeFile(join(ambient, "auth.json"), content, { mode: 0o600 });
+    expect(await importAmbientAuth(ambient, isolated)).toBe(true);
+    expect(await readFile(join(isolated, "auth.json"), "utf8")).toBe(content);
+  });
+
   test("imports ambient auth when credential files do not support hard links", async () => {
     if (
       runTestInSubprocess(
