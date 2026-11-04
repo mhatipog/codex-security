@@ -1207,6 +1207,45 @@ describe("CLI authentication", () => {
     },
   );
 
+  test("does not inherit a renewable ChatGPT login during status", async () => {
+    const root = await realpath(
+      await temporaryDirectory("codex-security-cli-renewable-auth-"),
+    );
+    try {
+      const ambientHome = join(root, "ambient-codex");
+      await mkdir(ambientHome, { mode: 0o700 });
+      await writeFile(
+        join(ambientHome, "auth.json"),
+        JSON.stringify({
+          auth_mode: "chatgpt",
+          tokens: { refresh_token: "SYNTHETIC_REFRESH" },
+        }),
+        { mode: 0o600 },
+      );
+      const deps = dependencies({
+        environment: {
+          CODEX_HOME: ambientHome,
+          CODEX_SECURITY_STATE_DIR: stateDirectory,
+        },
+      });
+      deps.runCodex = async (args, _output, authEnvironment) => {
+        expect(args).toEqual(["login", "status"]);
+        expect(authEnvironment?.["CODEX_HOME"]).toBe(
+          join(stateDirectory, "codex-home"),
+        );
+        return 1;
+      };
+      expect(
+        await main(["login", "status"], capture().stream, capture().stream, deps),
+      ).toBe(1);
+      expect(existsSync(join(stateDirectory, "codex-home", "auth.json"))).toBe(
+        false,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test.each([false, true])(
     "recognizes existing ambient Codex authentication on a fresh state directory during login status (home-relative: %p)",
     async (homeRelative) => {
