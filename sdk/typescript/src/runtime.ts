@@ -2370,6 +2370,23 @@ export async function importAmbientAuth(
   try {
     await copyFile(source, temporary, constants.COPYFILE_EXCL);
     await chmod(temporary, 0o600);
+    // A copied refresh token would create two independently writable sessions.
+    // Inspect the copied snapshot, not the source, so a concurrent replacement
+    // of ambient auth.json cannot change which credentials we approve.
+    let credentials: unknown;
+    try {
+      credentials = JSON.parse(await readFile(temporary, "utf8"));
+    } catch {
+      // Leave malformed authentication for native Codex to diagnose as before.
+      credentials = null;
+    }
+    if (
+      isRecord(credentials) &&
+      isRecord(credentials["tokens"]) &&
+      "refresh_token" in credentials["tokens"]
+    ) {
+      return false;
+    }
     try {
       try {
         await link(temporary, destination);
